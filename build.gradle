@@ -1,0 +1,66 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.2.3'
+    id 'io.spring.dependency-management' version '1.1.4'
+}
+
+group = 'com.codequery'
+version = '0.0.1-SNAPSHOT'
+
+java {
+    sourceCompatibility = '17'
+}
+
+configurations {
+    compileOnly {
+        extendsFrom annotationProcessor
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Spring Boot
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    
+    // Spring AI
+    implementation 'org.springframework.ai:spring-ai-ollama:1.0.0-M6'
+    implementation 'org.springframework.ai:spring-ai-core:1.0.0-M6'
+    implementation 'org.springframework.ai:spring-ai-vector-store:1.0.0-M7'
+    
+    // In-memory database for vector storage
+    implementation 'com.h2database:h2'
+    
+    // JavaParser for AST parsing
+    implementation 'com.github.javaparser:javaparser-core:3.25.8'
+    
+    // Vector DB for embeddings
+    implementation 'org.postgresql:postgresql'
+    implementation 'ai.djl:api:0.32.0'
+    implementation 'ai.djl.huggingface:tokenizers:0.25.0'
+    
+    // Jackson for JSON
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+    
+    // Utilities
+    implementation 'org.apache.commons:commons-lang3:3.14.0'
+    implementation 'org.apache.commons:commons-collections4:4.4'
+    implementation 'org.apache.commons:commons-text:1.11.0'
+    
+    // Lombok
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+    
+    // Testing
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
+
+
