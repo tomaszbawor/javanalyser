@@ -1,1 +1,8 @@
+pluginManagement {
+    repositories {
+        mavenCentral()          // Spring Boot 3.2.x plugin is here
+        gradlePluginPortal()    // keep this for all the other plugins
+    }
+}
+
 rootProject.name = 'javanalyser'
