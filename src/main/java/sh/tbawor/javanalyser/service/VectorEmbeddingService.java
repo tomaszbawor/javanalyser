@@ -12,12 +12,15 @@ import org.springframework.ai.ollama.OllamaEmbeddingModel;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.embedding.EmbeddingRequest;
 import org.springframework.ai.embedding.EmbeddingResponse;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 @Service
@@ -29,33 +32,91 @@ public class VectorEmbeddingService {
   private final EmbeddingModel embeddingModel;
   private final VectorUtil vectorUtil;
 
+  @Value("${embedding.batch.size:50}")
+  private int batchSize;
+
+  @Value("${embedding.max.embeddings:5000}")
+  private int maxEmbeddings;
+
+  @Value("${embedding.progress.log.interval:5}")
+  private int progressLogInterval;
+
   /**
    * Creates embeddings for all nodes in the dependency graph and stores them in
-   * the repository
+   * the repository with database bounds and batch processing
    */
   @Transactional
   public void createEmbeddingsFromGraph(DependencyGraph graph) {
-    log.info("Starting to create embeddings for {} nodes", graph.getNodes().size());
+    long startTime = System.currentTimeMillis();
+    List<AstNode> nodes = graph.getNodes();
+    int totalNodes = nodes.size();
+
+    log.info("Starting to create embeddings for {} nodes with batch size {} and max embeddings {}", 
+        totalNodes, batchSize, maxEmbeddings);
 
     // Clear existing embeddings
+    log.info("Clearing existing embeddings from database");
     repository.deleteAll();
 
-    // Process each node
-    int count = 0;
-    for (AstNode node : graph.getNodes()) {
-      try {
-        createEmbeddingForNode(node);
-        count++;
+    // Create batches of nodes to process
+    List<List<AstNode>> batches = createBatches(nodes, batchSize);
+    log.info("Created {} batches with max size of {}", batches.size(), batchSize);
 
-        if (count % 100 == 0) {
-          log.info("Created embeddings for {} nodes", count);
+    AtomicInteger processedNodes = new AtomicInteger(0);
+    AtomicInteger successfulEmbeddings = new AtomicInteger(0);
+    int lastLoggedPercentage = 0;
+
+    // Process each batch
+    for (List<AstNode> batch : batches) {
+      // Process each node in the batch
+      for (AstNode node : batch) {
+        // Check if we've reached the maximum number of embeddings
+        if (successfulEmbeddings.get() >= maxEmbeddings) {
+          log.warn("Reached maximum embedding count ({}). Stopping embedding generation.", maxEmbeddings);
+          break;
         }
-      } catch (Exception e) {
-        log.error("Error creating embedding for node: {}", node.getName(), e);
+
+        try {
+          // Create embedding for the node
+          createEmbeddingForNode(node);
+          successfulEmbeddings.incrementAndGet();
+        } catch (Exception e) {
+          log.error("Error creating embedding for node: {} in {}", node.getName(), node.getFilePath(), e);
+        }
+
+        // Update progress
+        int currentProcessed = processedNodes.incrementAndGet();
+        int percentage = (currentProcessed * 100) / totalNodes;
+
+        // Log progress at intervals
+        if (percentage >= lastLoggedPercentage + progressLogInterval) {
+          log.info("Embedding progress: {}% ({}/{} nodes, {} embeddings created)", 
+              percentage, currentProcessed, totalNodes, successfulEmbeddings.get());
+          lastLoggedPercentage = percentage;
+        }
+      }
+
+      // Check if we've reached the maximum number of embeddings
+      if (successfulEmbeddings.get() >= maxEmbeddings) {
+        break;
       }
     }
 
-    log.info("Completed creating embeddings for {} nodes", count);
+    long duration = System.currentTimeMillis() - startTime;
+    log.info("Completed creating {} embeddings for {} nodes in {}ms", 
+        successfulEmbeddings.get(), processedNodes.get(), duration);
+  }
+
+  /**
+   * Creates batches of nodes to process
+   */
+  private <T> List<List<T>> createBatches(List<T> items, int batchSize) {
+    List<List<T>> batches = new ArrayList<>();
+    for (int i = 0; i < items.size(); i += batchSize) {
+      int end = Math.min(i + batchSize, items.size());
+      batches.add(new ArrayList<>(items.subList(i, end)));
+    }
+    return batches;
   }
 
   /**

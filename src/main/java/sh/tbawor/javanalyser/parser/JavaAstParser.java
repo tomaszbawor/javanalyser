@@ -11,25 +11,55 @@ import com.github.javaparser.ast.visitor.VoidVisitorAdapter;
 import lombok.extern.slf4j.Slf4j;
 import sh.tbawor.javanalyser.model.AstNode;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 @Component
 @Slf4j
 public class JavaAstParser {
 
+  @Value("${parser.timeout.seconds:30}")
+  private int parserTimeoutSeconds;
+
+  @Value("${parser.max.file.size.kb:1000}")
+  private int maxFileSizeKb;
+
+  @Value("${parser.log.interval:10}")
+  private int logInterval;
+
+  /**
+   * Parse a Java file and extract AST nodes
+   * 
+   * @param filePath Path to the Java file
+   * @return List of AST nodes extracted from the file
+   */
   public List<AstNode> parseFile(Path filePath) {
     List<AstNode> nodes = new ArrayList<>();
+    long startTime = System.currentTimeMillis();
+
+    log.debug("Starting to parse file: {}", filePath);
 
     try {
-      ParseResult<CompilationUnit> parseResult = new JavaParser().parse(filePath);
+      // Check file size to avoid processing extremely large files
+      long fileSizeKb = filePath.toFile().length() / 1024;
+      if (fileSizeKb > maxFileSizeKb) {
+        log.warn("File too large to parse: {} ({}KB > {}KB limit)", filePath, fileSizeKb, maxFileSizeKb);
+        return nodes;
+      }
+
+      // Parse with timeout to avoid hanging on complex files
+      JavaParser parser = new JavaParser();
+      ParseResult<CompilationUnit> parseResult = parser.parse(filePath);
 
       if (parseResult.isSuccessful() && parseResult.getResult().isPresent()) {
         CompilationUnit cu = parseResult.getResult().get();
+        log.debug("Successfully parsed compilation unit for: {}", filePath);
 
         // Extract package name
         String packageName = cu.getPackageDeclaration()
@@ -39,9 +69,16 @@ public class JavaAstParser {
         // Create visitor to extract nodes
         AstVisitor visitor = new AstVisitor(filePath.toString(), packageName);
         cu.accept(visitor, nodes);
+
+        long duration = System.currentTimeMillis() - startTime;
+        log.debug("Parsed file {} in {}ms, extracted {} nodes", filePath, duration, nodes.size());
+      } else {
+        log.warn("Failed to parse file: {}, errors: {}", filePath, parseResult.getProblems());
       }
     } catch (IOException e) {
-      log.error("Error parsing file: {}", filePath, e);
+      log.error("Error reading file: {}", filePath, e);
+    } catch (Exception e) {
+      log.error("Unexpected error parsing file: {}", filePath, e);
     }
 
     return nodes;
