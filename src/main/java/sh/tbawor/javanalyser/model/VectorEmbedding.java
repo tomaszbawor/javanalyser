@@ -32,7 +32,7 @@ public class VectorEmbedding {
   @Column(nullable = false)
   private String packageName;
 
-  @Column(length = 10000)
+  @Column(length = 100000)
   private String sourceCodeSnippet;
 
   @Column(length = 1000)

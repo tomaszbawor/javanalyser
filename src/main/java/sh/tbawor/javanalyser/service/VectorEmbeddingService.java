@@ -9,6 +9,7 @@ import sh.tbawor.javanalyser.repository.VectorEmbeddingRepository;
 import sh.tbawor.javanalyser.util.VectorUtil;
 
 import org.springframework.ai.ollama.OllamaEmbeddingModel;
+import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.embedding.EmbeddingRequest;
 import org.springframework.ai.embedding.EmbeddingResponse;
 import org.springframework.scheduling.annotation.Async;
@@ -25,7 +26,7 @@ import java.util.stream.Collectors;
 public class VectorEmbeddingService {
 
   private final VectorEmbeddingRepository repository;
-  private final OllamaEmbeddingModel embeddingModel;
+  private final EmbeddingModel embeddingModel;
   private final VectorUtil vectorUtil;
 
   /**
