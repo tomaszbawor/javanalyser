@@ -1,0 +1,190 @@
+meta {
+  name: JavaAnalyzer
+  type: http
+  seq: 1
+}
+
+# Base URL Environment
+env_variables_global {
+  base_url: http://localhost:8080
+}
+
+# Project Structure Analysis
+get {
+  url: {{base_url}}/api/code/dependencies
+  name: Get Dependency Graph
+  headers {
+    Content-Type: application/json
+  }
+}
+
+# Refresh Codebase
+get {
+  url: {{base_url}}/api/code/refresh
+  name: Refresh Codebase
+  headers {
+    Content-Type: application/json
+  }
+}
+
+# Query Code (Standard)
+post {
+  url: {{base_url}}/api/code/query
+  name: Query Code
+  headers {
+    Content-Type: application/json
+  }
+  body: json {
+    {
+      "query": "How are dependencies resolved in the application?",
+      "includeSourceCode": true,
+      "useSemanticSearch": true,
+      "maxResults": 5
+    }
+  }
+}
+
+# Query Code (With Context)
+post {
+  url: {{base_url}}/api/code/query
+  name: Query Code with Package Context
+  headers {
+    Content-Type: application/json
+  }
+  body: json {
+    {
+      "query": "How does the AstFormatter work?",
+      "context": "sh.tbawor.javanalyser.service",
+      "includeSourceCode": true,
+      "useSemanticSearch": true,
+      "maxResults": 5
+    }
+  }
+}
+
+# Semantic Search
+post {
+  url: {{base_url}}/api/code/search
+  name: Semantic Search
+  headers {
+    Content-Type: application/json
+  }
+  body: json {
+    {
+      "query": "vector embedding generation",
+      "maxResults": 10,
+      "includeCode": true
+    }
+  }
+}
+
+# Semantic Search with Package Filter
+post {
+  url: {{base_url}}/api/code/search
+  name: Semantic Search with Package Filter
+  headers {
+    Content-Type: application/json
+  }
+  body: json {
+    {
+      "query": "source code extraction",
+      "maxResults": 10,
+      "includeCode": true,
+      "filterPackage": "sh.tbawor.javanalyser.parser"
+    }
+  }
+}
+
+# Get Sources for Package 
+get {
+  url: {{base_url}}/api/code/sources/sh.tbawor.javanalyser.service
+  name: Get Sources for Package
+  headers {
+    Content-Type: application/json
+  }
+}
+
+# Performance Tests
+
+# Batch Query Test 
+post {
+  url: {{base_url}}/api/code/query
+  name: Performance Test - Complex Query
+  headers {
+    Content-Type: application/json
+  }
+  body: json {
+    {
+      "query": "Analyze all classes involved in vector embeddings. How do they interact? Show me the data flow and explain the main algorithms.",
+      "includeSourceCode": true,
+      "useSemanticSearch": true,
+      "maxResults": 15,
+      "maxTokens": 8000
+    }
+  }
+}
+
+# Quick Query Test
+post {
+  url: {{base_url}}/api/code/query
+  name: Performance Test - Quick Query
+  headers {
+    Content-Type: application/json
+  }
+  body: json {
+    {
+      "query": "List all service classes and their main responsibilities",
+      "includeSourceCode": false,
+      "useSemanticSearch": true,
+      "maxResults": 5,
+      "maxTokens": 2000
+    }
+  }
+}
+
+# Spring Actuator Endpoints
+
+# Application Health
+get {
+  url: {{base_url}}/actuator/health
+  name: Check Application Health
+  headers {
+    Content-Type: application/json
+  }
+}
+
+# Application Info
+get {
+  url: {{base_url}}/actuator/info
+  name: Get Application Info
+  headers {
+    Content-Type: application/json
+  }
+}
+
+# Metrics
+get {
+  url: {{base_url}}/actuator/metrics
+  name: Get Available Metrics
+  headers {
+    Content-Type: application/json
+  }
+}
+
+# Specific Metric - JVM Memory
+get {
+  url: {{base_url}}/actuator/metrics/jvm.memory.used
+  name: Get JVM Memory Usage
+  headers {
+    Content-Type: application/json
+  }
+}
+
+# Specific Metric - HTTP Requests
+get {
+  url: {{base_url}}/actuator/metrics/http.server.requests
+  name: Get HTTP Request Metrics
+  headers {
+    Content-Type: application/json
+  }
+}
