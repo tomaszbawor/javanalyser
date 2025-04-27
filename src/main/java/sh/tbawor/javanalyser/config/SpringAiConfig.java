@@ -37,6 +37,8 @@ public class SpringAiConfig {
 
   @Bean
   public EmbeddingModel ollamaEmbeddingModel(OllamaApi ollamaApi) {
-    return OllamaEmbeddingModel.builder().ollamaApi(ollamaApi).build();
+    OllamaOptions options = new OllamaOptions();
+    options.setModel(embeddingModel);
+    return OllamaEmbeddingModel.builder().ollamaApi(ollamaApi).defaultOptions(options).build();
   }
 }
