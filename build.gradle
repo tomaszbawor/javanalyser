@@ -36,7 +36,7 @@ dependencies {
     implementation 'com.h2database:h2'
     
     // JavaParser for AST parsing
-    implementation 'com.github.javaparser:javaparser-core:3.25.8'
+    implementation 'com.github.javaparser:javaparser-core:3.26.4'
     
     // Vector DB for embeddings
     implementation 'org.postgresql:postgresql'
