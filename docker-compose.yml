@@ -1,0 +1,24 @@
+services:
+  db:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: code_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./pgdata:/var/lib/postgresql/data
+# Uncomment and configure the following to containerize the Spring Boot application:
+# app:
+#   build: .
+#   ports:
+#     - "8080:8080"
+#   environment:
+#     SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/code_db
+#     SPRING_DATASOURCE_USERNAME: postgres
+#     SPRING_DATASOURCE_PASSWORD: password
+#   depends_on:
+#     - db
+
