@@ -28,7 +28,7 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     
     // Spring AI
-    implementation 'org.springframework.ai:spring-ai-ollama:1.0.0-M7'
+    implementation 'org.springframework.ai:spring-ai-ollama:1.0.0-M8'
     implementation 'org.springframework.ai:spring-ai-core:1.0.0-M6'
     implementation 'org.springframework.ai:spring-ai-vector-store:1.0.0-M7'
     
