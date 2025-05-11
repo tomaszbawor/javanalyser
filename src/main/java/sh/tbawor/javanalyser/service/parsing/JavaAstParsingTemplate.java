@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import sh.tbawor.javanalyser.exception.ParsingException;
 import sh.tbawor.javanalyser.model.AstNode;
 import sh.tbawor.javanalyser.model.CodeDependency;
 import sh.tbawor.javanalyser.model.DependencyGraph;
@@ -18,7 +19,6 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -45,6 +45,12 @@ public class JavaAstParsingTemplate extends ParsingTemplate {
     @Value("${parser.progress.log.interval:5}")
     private int progressLogInterval;
 
+    /**
+     * Finds all Java files in the specified project directory
+     * 
+     * @param projectPath Path to the project root directory
+     * @return List of Java file paths
+     */
     @Override
     protected List<Path> findJavaFiles(String projectPath) {
         try {
@@ -57,145 +63,91 @@ public class JavaAstParsingTemplate extends ParsingTemplate {
             }
         } catch (IOException e) {
             log.error("Error finding Java files", e);
-            return new ArrayList<>();
+            throw new ParsingException("Error finding Java files in project path: " + projectPath, e);
         }
     }
 
+    /**
+     * Parses Java files to extract AST nodes
+     * 
+     * @param javaFiles List of Java file paths to parse
+     * @param graph Dependency graph to populate with nodes
+     */
     @Override
     protected void parseAstNodes(List<Path> javaFiles, DependencyGraph graph) {
-        int totalFiles = javaFiles.size();
-        
-        // Create batches of files to process
-        List<List<Path>> batches = createBatches(javaFiles, batchSize);
-        log.info("Created {} batches with max size of {}", batches.size(), batchSize);
-
-        AtomicInteger processedFiles = new AtomicInteger(0);
-        AtomicInteger nodeCount = new AtomicInteger(0);
-        int lastLoggedPercentage = 0;
-
-        // Process each batch
-        for (List<Path> batch : batches) {
-            // Process each file in the batch
-            for (Path filePath : batch) {
-                // Check if we've reached the maximum number of nodes
-                if (nodeCount.get() >= maxNodes) {
-                    log.warn("Reached maximum node count ({}). Stopping parsing.", maxNodes);
-                    break;
-                }
-
-                // Process the file
-                int nodesAdded = processJavaFile(filePath, graph);
-                nodeCount.addAndGet(nodesAdded);
-
-                // Update progress
-                int currentProcessed = processedFiles.incrementAndGet();
-                int percentage = (currentProcessed * 100) / totalFiles;
-
-                // Log progress at intervals
-                if (percentage >= lastLoggedPercentage + progressLogInterval) {
-                    log.info("First pass progress: {}% ({}/{} files, {} nodes)", 
-                        percentage, currentProcessed, totalFiles, nodeCount.get());
-                    lastLoggedPercentage = percentage;
-                }
-            }
-
-            // Check if we've reached the maximum number of nodes
-            if (nodeCount.get() >= maxNodes) {
+        // Process only up to maxNodes files
+        int count = 0;
+        for (Path filePath : javaFiles) {
+            if (count >= maxNodes) {
                 break;
             }
-        }
-
-        log.info("First pass completed: parsed {} files, created {} nodes", 
-            processedFiles.get(), nodeCount.get());
-    }
-
-    @Override
-    protected void enrichWithSourceCode(List<Path> javaFiles, DependencyGraph graph) {
-        int totalFiles = javaFiles.size();
-        
-        // Create batches of files to process
-        List<List<Path>> batches = createBatches(javaFiles, batchSize);
-
-        AtomicInteger processedFiles = new AtomicInteger(0);
-        int lastLoggedPercentage = 0;
-
-        // Process each batch
-        for (List<Path> batch : batches) {
-            for (Path filePath : batch) {
-                try {
-                    log.debug("Enriching file with source code: {}", filePath);
-                    sourceCodeExtractor.extractSourceCode(filePath, graph);
-                } catch (Exception e) {
-                    log.error("Error enriching file with source code: {}", filePath, e);
+            
+            try {
+                // Parse file
+                List<AstNode> nodes = astParser.parseFile(filePath);
+                
+                // Add nodes to graph
+                for (AstNode node : nodes) {
+                    graph.addNode(node);
+                    count++;
+                    if (count >= maxNodes) {
+                        break;
+                    }
                 }
-
-                // Update progress
-                int currentProcessed = processedFiles.incrementAndGet();
-                int percentage = (currentProcessed * 100) / totalFiles;
-
-                // Log progress at intervals
-                if (percentage >= lastLoggedPercentage + progressLogInterval) {
-                    log.info("Second pass progress: {}% ({}/{} files)", 
-                        percentage, currentProcessed, totalFiles);
-                    lastLoggedPercentage = percentage;
+                
+                // Extract dependencies
+                List<CodeDependency> dependencies = dependencyExtractor.extractDependencies(filePath, nodes);
+                for (CodeDependency dependency : dependencies) {
+                    graph.addDependency(dependency);
                 }
+            } catch (Exception e) {
+                log.error("Error parsing file: {}", filePath, e);
             }
         }
-
-        log.info("Second pass completed: enriched {} files with source code", processedFiles.get());
     }
 
+    /**
+     * Enriches nodes in the graph with source code
+     * 
+     * @param javaFiles List of Java file paths
+     * @param graph Dependency graph with nodes to enrich
+     */
+    @Override
+    protected void enrichWithSourceCode(List<Path> javaFiles, DependencyGraph graph) {
+        for (Path filePath : javaFiles) {
+            // For each file, check if it was successfully parsed
+            boolean fileHasNodes = false;
+            for (AstNode node : graph.getNodes()) {
+                if (node.getFilePath() != null && node.getFilePath().equals(filePath.toString())) {
+                    fileHasNodes = true;
+                    break;
+                }
+            }
+            
+            // Only call extractSourceCode for files that were successfully parsed
+            if (fileHasNodes) {
+                sourceCodeExtractor.extractSourceCode(filePath, graph);
+            }
+        }
+    }
+
+    /**
+     * Extracts cross-file dependencies
+     * 
+     * @param graph Dependency graph to process
+     */
     @Override
     protected void extractCrossFileDependencies(DependencyGraph graph) {
-        log.info("Starting third pass: extracting cross-file dependencies");
         dependencyExtractor.extractCrossFileDependencies(graph);
-        log.info("Third pass completed: extracted cross-file dependencies");
     }
 
+    /**
+     * Generates vector embeddings for nodes in the graph
+     * 
+     * @param graph Dependency graph with nodes to create embeddings for
+     */
     @Override
     protected void generateEmbeddings(DependencyGraph graph) {
-        log.info("Starting to generate embeddings for nodes");
         vectorEmbeddingService.createEmbeddingsFromGraph(graph);
-    }
-
-    /**
-     * Process a Java file and add its nodes to the dependency graph
-     * 
-     * @param filePath Path to the Java file
-     * @param graph The dependency graph to add nodes to
-     * @return Number of nodes added to the graph
-     */
-    private int processJavaFile(Path filePath, DependencyGraph graph) {
-        try {
-            log.debug("Processing file: {}", filePath);
-
-            // Parse AST
-            List<AstNode> fileNodes = astParser.parseFile(filePath);
-            int nodeCount = fileNodes.size();
-
-            // Add nodes to the graph
-            fileNodes.forEach(graph::addNode);
-
-            // Extract dependencies within the file
-            List<CodeDependency> dependencies = dependencyExtractor.extractDependencies(filePath, fileNodes);
-            dependencies.forEach(graph::addDependency);
-
-            return nodeCount;
-        } catch (Exception e) {
-            log.error("Error processing file: {}", filePath, e);
-            return 0;
-        }
-    }
-
-    /**
-     * Creates batches of files to process
-     */
-    private <T> List<List<T>> createBatches(List<T> items, int batchSize) {
-        List<List<T>> batches = new ArrayList<>();
-        for (int i = 0; i < items.size(); i += batchSize) {
-            int end = Math.min(i + batchSize, items.size());
-            batches.add(new ArrayList<>(items.subList(i, end)));
-        }
-        return batches;
     }
 }

@@ -8,6 +8,8 @@ import com.github.javaparser.ast.body.ConstructorDeclaration;
 import com.github.javaparser.ast.body.FieldDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.visitor.VoidVisitorAdapter;
+import com.github.javaparser.ast.nodeTypes.NodeWithModifiers;
+import com.github.javaparser.ast.Modifier;
 import lombok.extern.slf4j.Slf4j;
 import sh.tbawor.javanalyser.model.AstNode;
 
@@ -18,8 +20,14 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * Parser for Java source files that extracts AST nodes using JavaParser library.
+ * Converts Java source code constructs into AstNode objects that can be processed
+ * by the dependency analyzer.
+ */
 @Component
 @Slf4j
 public class JavaAstParser {
@@ -45,35 +53,15 @@ public class JavaAstParser {
 
     log.debug("Starting to parse file: {}", filePath);
 
+    if (isFileTooLarge(filePath)) {
+      return nodes;
+    }
+
     try {
-      // Check file size to avoid processing extremely large files
-      long fileSizeKb = filePath.toFile().length() / 1024;
-      if (fileSizeKb > maxFileSizeKb) {
-        log.warn("File too large to parse: {} ({}KB > {}KB limit)", filePath, fileSizeKb, maxFileSizeKb);
-        return nodes;
-      }
-
-      // Parse with timeout to avoid hanging on complex files
-      JavaParser parser = new JavaParser();
-      ParseResult<CompilationUnit> parseResult = parser.parse(filePath);
-
-      if (parseResult.isSuccessful() && parseResult.getResult().isPresent()) {
-        CompilationUnit cu = parseResult.getResult().get();
-        log.debug("Successfully parsed compilation unit for: {}", filePath);
-
-        // Extract package name
-        String packageName = cu.getPackageDeclaration()
-            .map(pd -> pd.getName().asString())
-            .orElse("");
-
-        // Create visitor to extract nodes
-        AstVisitor visitor = new AstVisitor(filePath.toString(), packageName);
-        cu.accept(visitor, nodes);
-
-        long duration = System.currentTimeMillis() - startTime;
-        log.debug("Parsed file {} in {}ms, extracted {} nodes", filePath, duration, nodes.size());
-      } else {
-        log.warn("Failed to parse file: {}, errors: {}", filePath, parseResult.getProblems());
+      CompilationUnit compilationUnit = parseCompilationUnit(filePath);
+      if (compilationUnit != null) {
+        processCompilationUnit(compilationUnit, filePath, nodes);
+        logParsingStats(startTime, filePath, nodes.size());
       }
     } catch (IOException e) {
       log.error("Error reading file: {}", filePath, e);
@@ -84,6 +72,78 @@ public class JavaAstParser {
     return nodes;
   }
 
+  /**
+   * Checks if the file exceeds the maximum size limit
+   * 
+   * @param filePath Path to check
+   * @return true if file is too large, false otherwise
+   */
+  private boolean isFileTooLarge(Path filePath) {
+    try {
+      long fileSizeKb = filePath.toFile().length() / 1024;
+      if (fileSizeKb > maxFileSizeKb) {
+        log.warn("File too large to parse: {} ({}KB > {}KB limit)", filePath, fileSizeKb, maxFileSizeKb);
+        return true;
+      }
+      return false;
+    } catch (Exception e) {
+      log.error("Error checking file size: {}", filePath, e);
+      return true;
+    }
+  }
+
+  /**
+   * Parses a Java file into a CompilationUnit
+   * 
+   * @param filePath Path to the Java file
+   * @return CompilationUnit if parsing was successful, null otherwise
+   * @throws IOException if file cannot be read
+   */
+  private CompilationUnit parseCompilationUnit(Path filePath) throws IOException {
+    JavaParser parser = new JavaParser();
+    ParseResult<CompilationUnit> parseResult = parser.parse(filePath);
+
+    if (parseResult.isSuccessful() && parseResult.getResult().isPresent()) {
+      CompilationUnit cu = parseResult.getResult().get();
+      log.debug("Successfully parsed compilation unit for: {}", filePath);
+      return cu;
+    } else {
+      log.warn("Failed to parse file: {}, errors: {}", filePath, parseResult.getProblems());
+      return null;
+    }
+  }
+
+  /**
+   * Process a parsed compilation unit to extract AST nodes
+   * 
+   * @param cu The parsed compilation unit
+   * @param filePath Path to the source file
+   * @param nodes List to populate with extracted nodes
+   */
+  private void processCompilationUnit(CompilationUnit cu, Path filePath, List<AstNode> nodes) {
+    String packageName = cu.getPackageDeclaration()
+        .map(pd -> pd.getName().asString())
+        .orElse("");
+
+    AstVisitor visitor = new AstVisitor(filePath.toString(), packageName);
+    cu.accept(visitor, nodes);
+  }
+
+  /**
+   * Log statistics about the parsing operation
+   * 
+   * @param startTime Time when parsing started
+   * @param filePath Path to the parsed file
+   * @param nodeCount Number of nodes extracted
+   */
+  private void logParsingStats(long startTime, Path filePath, int nodeCount) {
+    long duration = System.currentTimeMillis() - startTime;
+    log.debug("Parsed file {} in {}ms, extracted {} nodes", filePath, duration, nodeCount);
+  }
+
+  /**
+   * Visitor implementation that traverses the AST and creates AstNode objects
+   */
   private static class AstVisitor extends VoidVisitorAdapter<List<AstNode>> {
     private final String filePath;
     private final String packageName;
@@ -95,22 +155,7 @@ public class JavaAstParser {
 
     @Override
     public void visit(ClassOrInterfaceDeclaration n, List<AstNode> nodes) {
-      // Create AST node for the class/interface
-      AstNode classNode = AstNode.builder()
-          .type(n.isInterface() ? "interface" : "class")
-          .name(n.getNameAsString())
-          .filePath(filePath)
-          .lineNumber(n.getBegin().map(pos -> pos.line).orElse(0))
-          .packageName(packageName)
-          .visibility(getVisibility(n))
-          .isInterface(n.isInterface())
-          .isAbstract(n.isAbstract())
-          .build();
-
-      // Store line information for source code extraction
-      n.getBegin().ifPresent(begin -> classNode.setStartLine(begin.line));
-      n.getEnd().ifPresent(end -> classNode.setEndLine(end.line));
-
+      AstNode classNode = createClassNode(n);
       nodes.add(classNode);
 
       // Process class members
@@ -126,6 +171,22 @@ public class JavaAstParser {
       super.visit(n, nodes);
     }
 
+    private AstNode createClassNode(ClassOrInterfaceDeclaration n) {
+      AstNode classNode = AstNode.builder()
+          .type(n.isInterface() ? "interface" : "class")
+          .name(n.getNameAsString())
+          .filePath(filePath)
+          .lineNumber(getNodeLineNumber(n))
+          .packageName(packageName)
+          .visibility(getVisibility(n))
+          .isInterface(n.isInterface())
+          .isAbstract(n.isAbstract())
+          .build();
+
+      setNodeLineRange(n, classNode);
+      return classNode;
+    }
+
     @Override
     public void visit(FieldDeclaration n, List<AstNode> nodes) {
       n.getVariables().forEach(v -> {
@@ -133,17 +194,14 @@ public class JavaAstParser {
             .type("field")
             .name(v.getNameAsString())
             .filePath(filePath)
-            .lineNumber(n.getBegin().map(pos -> pos.line).orElse(0))
+            .lineNumber(getNodeLineNumber(n))
             .packageName(packageName)
             .visibility(getVisibility(n))
             .isStatic(n.isStatic())
             .returnType(n.getElementType().asString())
             .build();
 
-        // Store line information for source code extraction
-        n.getBegin().ifPresent(begin -> fieldNode.setStartLine(begin.line));
-        n.getEnd().ifPresent(end -> fieldNode.setEndLine(end.line));
-
+        setNodeLineRange(n, fieldNode);
         nodes.add(fieldNode);
       });
 
@@ -156,7 +214,7 @@ public class JavaAstParser {
           .type("method")
           .name(n.getNameAsString())
           .filePath(filePath)
-          .lineNumber(n.getBegin().map(pos -> pos.line).orElse(0))
+          .lineNumber(getNodeLineNumber(n))
           .packageName(packageName)
           .visibility(getVisibility(n))
           .isStatic(n.isStatic())
@@ -164,10 +222,7 @@ public class JavaAstParser {
           .returnType(n.getType().asString())
           .build();
 
-      // Store line information for source code extraction
-      n.getBegin().ifPresent(begin -> methodNode.setStartLine(begin.line));
-      n.getEnd().ifPresent(end -> methodNode.setEndLine(end.line));
-
+      setNodeLineRange(n, methodNode);
       nodes.add(methodNode);
       super.visit(n, nodes);
     }
@@ -178,38 +233,51 @@ public class JavaAstParser {
           .type("constructor")
           .name(n.getNameAsString())
           .filePath(filePath)
-          .lineNumber(n.getBegin().map(pos -> pos.line).orElse(0))
+          .lineNumber(getNodeLineNumber(n))
           .packageName(packageName)
           .visibility(getVisibility(n))
           .build();
 
-      // Store line information for source code extraction
-      n.getBegin().ifPresent(begin -> constructorNode.setStartLine(begin.line));
-      n.getEnd().ifPresent(end -> constructorNode.setEndLine(end.line));
-
+      setNodeLineRange(n, constructorNode);
       nodes.add(constructorNode);
       super.visit(n, nodes);
     }
 
-    private String getVisibility(com.github.javaparser.ast.body.BodyDeclaration<?> declaration) {
-      if (declaration instanceof com.github.javaparser.ast.nodeTypes.NodeWithModifiers) {
-        com.github.javaparser.ast.nodeTypes.NodeWithModifiers<?> nodeWithModifiers = (com.github.javaparser.ast.nodeTypes.NodeWithModifiers<?>) declaration;
+    /**
+     * Gets the line number for a node, defaulting to 0 if not available
+     */
+    private int getNodeLineNumber(com.github.javaparser.ast.Node node) {
+      return node.getBegin().map(pos -> pos.line).orElse(0);
+    }
 
-        if (nodeWithModifiers.hasModifier(com.github.javaparser.ast.Modifier.Keyword.PUBLIC)) {
+    /**
+     * Sets the start and end line for a node
+     */
+    private void setNodeLineRange(com.github.javaparser.ast.Node javaParserNode, AstNode astNode) {
+      javaParserNode.getBegin().ifPresent(begin -> astNode.setStartLine(begin.line));
+      javaParserNode.getEnd().ifPresent(end -> astNode.setEndLine(end.line));
+    }
+
+    /**
+     * Determines the visibility modifier of a declaration
+     */
+    private String getVisibility(com.github.javaparser.ast.body.BodyDeclaration<?> declaration) {
+      if (declaration instanceof NodeWithModifiers) {
+        NodeWithModifiers<?> nodeWithModifiers = (NodeWithModifiers<?>) declaration;
+
+        if (nodeWithModifiers.hasModifier(Modifier.Keyword.PUBLIC)) {
           return "public";
         }
-        if (nodeWithModifiers.hasModifier(com.github.javaparser.ast.Modifier.Keyword.PRIVATE)) {
+        if (nodeWithModifiers.hasModifier(Modifier.Keyword.PRIVATE)) {
           return "private";
         }
-        if (nodeWithModifiers.hasModifier(com.github.javaparser.ast.Modifier.Keyword.PROTECTED)) {
+        if (nodeWithModifiers.hasModifier(Modifier.Keyword.PROTECTED)) {
           return "protected";
         }
         return "package-private";
       } else {
-        // If it doesn't have modifiers, we assume package-private
         return "package-private";
       }
-
     }
   }
 }
