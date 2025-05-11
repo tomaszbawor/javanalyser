@@ -32,13 +32,10 @@ dependencies {
     implementation 'org.springframework.ai:spring-ai-core:1.0.0-M6'
     implementation 'org.springframework.ai:spring-ai-vector-store:1.0.0-M7'
     
-    // In-memory database for vector storage
-    implementation 'com.h2database:h2'
-    
     // JavaParser for AST parsing
     implementation 'com.github.javaparser:javaparser-core:3.25.8'
     
-    // Vector DB for embeddings
+    // PostgreSQL driver
     implementation 'org.postgresql:postgresql'
     implementation 'ai.djl:api:0.32.0'
     implementation 'ai.djl.huggingface:tokenizers:0.25.0'
@@ -58,6 +55,9 @@ dependencies {
     
     // Testing
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    // Testcontainers for integration testing with PostgreSQL
+    testImplementation 'org.testcontainers:junit-jupiter:1.18.3'
+    testImplementation 'org.testcontainers:postgresql:1.18.3'
 }
 
 tasks.named('test') {

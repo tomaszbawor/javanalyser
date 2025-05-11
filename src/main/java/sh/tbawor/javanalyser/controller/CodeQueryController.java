@@ -8,6 +8,7 @@ import sh.tbawor.javanalyser.model.SourceCodeContext;
 import sh.tbawor.javanalyser.model.VectorEmbedding;
 import sh.tbawor.javanalyser.service.AstService;
 import sh.tbawor.javanalyser.service.CodeQueryService;
+import sh.tbawor.javanalyser.service.ExplanationService;
 import sh.tbawor.javanalyser.service.VectorEmbeddingService;
 
 import org.springframework.http.ResponseEntity;
@@ -23,6 +24,7 @@ public class CodeQueryController {
   private final AstService astService;
   private final CodeQueryService codeQueryService;
   private final VectorEmbeddingService vectorEmbeddingService;
+  private final ExplanationService explanationService;
 
   @PostMapping("/query")
   public ResponseEntity<String> queryCode(@RequestBody CodeQueryRequest request) {
@@ -55,5 +57,19 @@ public class CodeQueryController {
   public ResponseEntity<List<SourceCodeContext>> getSourcesForPackage(@PathVariable String packageName) {
     List<SourceCodeContext> sources = astService.getSourceCodeForPackage(packageName);
     return ResponseEntity.ok(sources);
+  }
+
+  @GetMapping("/explain/{fullyQualifiedFunctionName}")
+  public ResponseEntity<String> explainFunction(@PathVariable String fullyQualifiedFunctionName) {
+    // Basic validation - you might want more robust FQN validation
+    if (fullyQualifiedFunctionName == null || !fullyQualifiedFunctionName.contains(".")) {
+      return ResponseEntity.badRequest().body("Invalid fully qualified function name provided.");
+    }
+    String explanation = explanationService.explainFunction(fullyQualifiedFunctionName);
+    if (explanation.startsWith("Error:")) {
+      // Return 404 or 500 based on the error type if needed
+      return ResponseEntity.status(404).body(explanation);
+    }
+    return ResponseEntity.ok(explanation);
   }
 }

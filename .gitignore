@@ -230,3 +230,5 @@ gradle-app.setting
 *.hprof
 
 # End of https://www.toptal.com/developers/gitignore/api/eclipse,java,vim,intellij+all,gradle
+## PostgreSQL data directory
+/pgdata/

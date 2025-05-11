@@ -28,7 +28,7 @@ public class DependencyGraph {
     }
   }
 
-  private String getNodeKey(AstNode node) {
+  public String getNodeKey(AstNode node) {
     return node.getPackageName() + "." + node.getName();
   }
 

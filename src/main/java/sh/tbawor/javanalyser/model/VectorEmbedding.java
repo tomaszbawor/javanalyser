@@ -38,7 +38,7 @@ public class VectorEmbedding {
   @Column(length = 1000)
   private String description;
 
-  @Lob
-  @Column(columnDefinition = "BLOB")
+  // Embedding vector stored as PostgreSQL bytea
+  @Column(columnDefinition = "BYTEA")
   private byte[] embedding;
 }

@@ -2,16 +2,32 @@ package sh.tbawor.javanalyser.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import sh.tbawor.javanalyser.model.AstNode;
+import sh.tbawor.javanalyser.exception.QueryException;
 import sh.tbawor.javanalyser.model.CodeQueryRequest;
 import sh.tbawor.javanalyser.model.DependencyGraph;
-import sh.tbawor.javanalyser.model.VectorEmbedding;
+import sh.tbawor.javanalyser.service.prompt.PromptBuilder;
+import sh.tbawor.javanalyser.service.query.QueryResult;
+import sh.tbawor.javanalyser.service.query.QueryStrategy;
 
 import org.springframework.stereotype.Service;
 
 import java.util.List;
-import java.util.stream.Collectors;
+import java.util.NoSuchElementException;
 
+/**
+ * Service for handling code queries and interacting with the LLM.
+ * This class implements the Strategy pattern to select the appropriate query execution
+ * strategy based on the request type, and the Builder pattern for prompt generation.
+ * 
+ * <p>The service flow works as follows:
+ * <ol>
+ *   <li>Obtain the dependency graph from AstService</li>
+ *   <li>Select the appropriate query strategy based on request parameters</li>
+ *   <li>Execute the strategy to obtain formatted results</li>
+ *   <li>Generate a prompt from the results using PromptBuilder</li>
+ *   <li>Submit the prompt to the LLM and return its response</li>
+ * </ol>
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -19,122 +35,84 @@ public class CodeQueryService {
 
   private final AstService astService;
   private final LocalLlmService llmService;
-  private final AstFormatter astFormatter;
-  private final VectorEmbeddingService vectorEmbeddingService;
-  private final SourceCodeService sourceCodeService;
+  private final List<QueryStrategy> queryStrategies;
 
+  /**
+   * Processes a code query request and returns the response from the LLM.
+   * Uses the Strategy pattern to select the appropriate query strategy based
+   * on the request parameters.
+   * 
+   * @param request The code query request containing query text and parameters
+   * @return The natural language response from the LLM
+   * @throws QueryException if no suitable strategy is found or query execution fails
+   */
   public String queryCode(CodeQueryRequest request) {
-    DependencyGraph graph = astService.getDependencyGraph();
-
-    // Default context and source code
-    String formattedGraph;
-    String sourceCodeContext = "";
-
-    // Use semantic search if enabled
-    if (request.isUseSemanticSearch()) {
-      List<VectorEmbedding> relevantResults = vectorEmbeddingService.semanticSearch(
-          request.getQuery(),
-          request.getMaxResults(),
-          request.getContext());
-
-      // Format results
-      formattedGraph = formatSemanticResults(relevantResults);
-
-      // Get source code if requested
-      if (request.isIncludeSourceCode()) {
-        sourceCodeContext = getSourceCodeFromResults(relevantResults, graph);
-      }
-    } else {
-      // Traditional context-based filtering
-      if (request.getContext() != null && !request.getContext().isEmpty()) {
-        // If context is provided, filter the graph
-        formattedGraph = astFormatter.formatFilteredGraph(graph, request.getContext());
-
-        // Get source code if requested
-        if (request.isIncludeSourceCode()) {
-          sourceCodeContext = sourceCodeService.getSourceCodeForContext(request.getContext(), graph);
-        }
-      } else {
-        formattedGraph = astFormatter.formatGraph(graph);
-
-        // Get source code for top-level classes if requested
-        if (request.isIncludeSourceCode()) {
-          sourceCodeContext = sourceCodeService.getSourceCodeHighlights(graph);
-        }
-      }
+    if (request == null) {
+      throw new QueryException("Query request cannot be null");
     }
+    
+    log.debug("Processing code query: {}", request.getQuery());
+    
+    try {
+      // Get the dependency graph
+      DependencyGraph graph = astService.getDependencyGraph();
+      if (graph == null || graph.getNodes().isEmpty()) {
+        log.warn("Dependency graph is empty. Results may be limited.");
+      }
 
-    // Generate prompt for LLM
-    String prompt = generatePrompt(request, formattedGraph, sourceCodeContext);
+      // Select the appropriate strategy based on the request
+      QueryStrategy strategy = selectQueryStrategy(request);
+      log.debug("Selected query strategy: {}", strategy.getClass().getSimpleName());
 
-    // Query the LLM
-    return llmService.query(prompt, request.getMaxTokens());
+      // Execute the strategy
+      QueryResult result = strategy.execute(request, graph);
+
+      // Generate prompt for LLM
+      String prompt = generatePrompt(request, result.getFormattedGraph(), result.getSourceCodeContext());
+
+      // Query the LLM
+      log.debug("Sending prompt to LLM with max tokens: {}", request.getMaxTokens());
+      return llmService.query(prompt, request.getMaxTokens());
+    } catch (NoSuchElementException e) {
+      log.error("No appropriate query strategy found for request", e);
+      throw new QueryException("No appropriate query strategy found for this request", e);
+    } catch (Exception e) {
+      log.error("Error processing code query", e);
+      throw new QueryException("Failed to process code query", e);
+    }
   }
 
-  private String formatSemanticResults(List<VectorEmbedding> results) {
-    StringBuilder sb = new StringBuilder();
-    sb.append("Semantic search results for the query:\n\n");
-
-    for (int i = 0; i < results.size(); i++) {
-      VectorEmbedding result = results.get(i);
-      sb.append(i + 1).append(". ");
-      sb.append("Type: ").append(result.getType()).append("\n");
-      sb.append("   Name: ").append(result.getName()).append("\n");
-      sb.append("   Package: ").append(result.getPackageName()).append("\n");
-      sb.append("   File: ").append(result.getFilePath()).append("\n");
-      sb.append("   Description: ").append(result.getDescription()).append("\n\n");
-    }
-
-    return sb.toString();
+  /**
+   * Selects the appropriate query strategy from the available strategies
+   * based on the request parameters.
+   * 
+   * @param request The code query request
+   * @return The selected query strategy
+   * @throws NoSuchElementException if no suitable strategy is found
+   */
+  private QueryStrategy selectQueryStrategy(CodeQueryRequest request) {
+    return queryStrategies.stream()
+        .filter(strategy -> strategy.canHandle(request))
+        .findFirst()
+        .orElseThrow(() -> new NoSuchElementException("No strategy found for request"));
   }
 
-  private String getSourceCodeFromResults(List<VectorEmbedding> results, DependencyGraph graph) {
-    StringBuilder sb = new StringBuilder("Source code snippets from relevant components:\n\n");
-
-    for (int i = 0; i < results.size(); i++) {
-      VectorEmbedding result = results.get(i);
-      sb.append(i + 1).append(". ");
-      sb.append(result.getType()).append(": ").append(result.getName()).append("\n");
-
-      // Add source code if available
-      if (result.getSourceCodeSnippet() != null && !result.getSourceCodeSnippet().isEmpty()) {
-        sb.append("```java\n");
-        sb.append(result.getSourceCodeSnippet()).append("\n");
-        sb.append("```\n\n");
-      } else {
-        // Try to get from graph if embedding doesn't have it
-        String nodeKey = result.getNodeKey();
-        AstNode node = graph.getNodeByKey(nodeKey);
-        if (node != null && node.getSourceCode() != null && !node.getSourceCode().isEmpty()) {
-          sb.append("```java\n");
-          sb.append(node.getSourceCode()).append("\n");
-          sb.append("```\n\n");
-        } else {
-          sb.append("(Source code not available)\n\n");
-        }
-      }
-    }
-
-    return sb.toString();
-  }
-
+  /**
+   * Generates a prompt for the LLM based on the query request and structured results.
+   * Uses the Builder pattern via PromptBuilder for clean, modular prompt construction.
+   * 
+   * @param request The original query request
+   * @param formattedGraph The formatted dependency graph information
+   * @param sourceCodeContext The relevant source code context
+   * @return The assembled prompt for the LLM
+   */
   private String generatePrompt(CodeQueryRequest request, String formattedGraph, String sourceCodeContext) {
-    StringBuilder promptBuilder = new StringBuilder();
-
-    promptBuilder.append("You are an expert Java developer assistant. ");
-    promptBuilder.append("Analyze the following code dependency information and answer the query.\n\n");
-
-    promptBuilder.append("Code Dependency Information:\n");
-    promptBuilder.append(formattedGraph);
-
-    // Add source code if provided
-    if (!sourceCodeContext.isEmpty()) {
-      promptBuilder.append("\n\nRelevant Source Code:\n");
-      promptBuilder.append(sourceCodeContext);
-    }
-
-    promptBuilder.append("\n\nUser Query: ").append(request.getQuery());
-
-    return promptBuilder.toString();
+    return new PromptBuilder()
+        .withPreamble("You are an expert Java developer assistant. " +
+                      "Analyze the following code dependency information and answer the query.")
+        .withDependencyInfo(formattedGraph)
+        .withSourceCode(sourceCodeContext)
+        .withQuery(request.getQuery())
+        .build();
   }
 }
