@@ -34,34 +34,39 @@ public class OllamaEmbeddingCreation extends EmbeddingCreationTemplate {
 
     @Override
     protected boolean createEmbeddingForNode(AstNode node) {
-        // Create text to embed
-        String textToEmbed = buildEmbeddingText(node);
+        try {
+            // Create text to embed
+            String textToEmbed = buildEmbeddingText(node);
 
-        // Generate embedding using the strategy
-        float[] embedding = embeddingStrategy.generateEmbedding(textToEmbed);
+            // Generate embedding using the strategy
+            float[] embedding = embeddingStrategy.generateEmbedding(textToEmbed);
 
-        // Convert float[] to byte[] for storage
-        byte[] embeddingBytes = vectorUtil.floatArrayToByteArray(embedding);
+            // Convert float[] to byte[] for storage
+            byte[] embeddingBytes = vectorUtil.floatArrayToByteArray(embedding);
 
-        // Build source code snippet
-        String sourceCodeSnippet = (node.getSourceCode() != null && node.getSourceCode().length() > 10000)
-                ? node.getSourceCode().substring(0, 10000) + "..."
-                : node.getSourceCode();
+            // Build source code snippet
+            String sourceCodeSnippet = (node.getSourceCode() != null && node.getSourceCode().length() > 10000)
+                    ? node.getSourceCode().substring(0, 10000) + "..."
+                    : node.getSourceCode();
 
-        // Create and save embedding
-        VectorEmbedding vectorEmbedding = VectorEmbedding.builder()
-                .nodeKey(node.getPackageName() + "." + node.getName())
-                .filePath(node.getFilePath())
-                .type(node.getType())
-                .name(node.getName())
-                .packageName(node.getPackageName())
-                .sourceCodeSnippet(sourceCodeSnippet)
-                .description(buildNodeDescription(node))
-                .embedding(embeddingBytes)
-                .build();
+            // Create and save embedding
+            VectorEmbedding vectorEmbedding = VectorEmbedding.builder()
+                    .nodeKey(node.getPackageName() + "." + node.getName())
+                    .filePath(node.getFilePath())
+                    .type(node.getType())
+                    .name(node.getName())
+                    .packageName(node.getPackageName())
+                    .sourceCodeSnippet(sourceCodeSnippet)
+                    .description(buildNodeDescription(node))
+                    .embedding(embeddingBytes)
+                    .build();
 
-        repository.save(vectorEmbedding);
-        return true;
+            repository.save(vectorEmbedding);
+            return true;
+        } catch (Exception e) {
+            log.error("Error creating embedding for node: {} in {}", node.getName(), node.getFilePath(), e);
+            return false;
+        }
     }
 
     /**
